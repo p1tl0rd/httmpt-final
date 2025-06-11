@@ -42,10 +42,10 @@ def Load_files():
     """
     # ==================== CONFIGURATION ====================
     # Thay đổi các tham số ở đây
-    NUM_AGENTS = 5                 # Tổng số UAV
+    NUM_AGENTS = 4                 # Tổng số UAV
     LEADER_ID = 2                  # UAV dẫn đầu (ID bắt đầu từ 0)
-    SPACING = 1.0                  # Khoảng cách cơ bản giữa các UAV
-    FORMATION_TYPE = 'v'           # Chọn đội hình: 'v', 'line', 'diamond'
+    SPACING = 2.0                  # Khoảng cách cơ bản giữa các UAV
+    FORMATION_TYPE = 'diamond'           # Chọn đội hình: 'v', 'line', 'diamond'
     
     # Danh sách các điểm tham chiếu (waypoints)
     WP_list = [[-20, 20], [20, 20], [20, -20], [-20, -20]]
