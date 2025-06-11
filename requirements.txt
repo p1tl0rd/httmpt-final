@@ -1,0 +1,8 @@
+numpy
+matplotlib
+shapely
+gym
+tensorflow==2.13.1
+PySimpleGUI
+dronekit
+pygame
