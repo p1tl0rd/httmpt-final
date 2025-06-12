@@ -35,7 +35,7 @@ class Swarm(object):
         self.num_obstacles = 10
         self.obstacle_radius = 1.5
         self.obstacle_pos = []
-        self.obstacle_safe_dist = self.obstacle_radius + 1.0 # Tổng bán kính vùng nguy hiểm
+        self.obstacle_safe_dist = self.obstacle_radius + 2.0 # tăng vùng an toàn
 
         # === Hằng số cho Hàm thưởng (Reward Constants) ===
         # Phần thưởng dương
@@ -48,7 +48,7 @@ class Swarm(object):
         
         # Hằng số mới cho việc phạt né vật cản theo cách tinh chỉnh
         self.obstacle_invasion_weight = -50.0  # Trọng số phạt khi xâm phạm vùng an toàn
-        self.obstacle_collision_penalty = -200 # Phạt khi va chạm cứng với vật cản
+        self.obstacle_penalty = -200  # hoặc -300 nếu muốn phạt mạnh hơn
 
         # Tham số môi trường và Pygame
         self.const = 30

@@ -119,45 +119,41 @@ class TD3():
 	def select_action2(self, state):
 		state = np.array(state)
 		n = self.env.N
-		state = state[: (n+1)*2]  # Only take agent and goal positions
-		state = state.reshape((n+1, 2))
-		
+		num_obs = self.env.num_obstacles
+		# Lấy agent, goal, obstacle positions
+		agent_goal_state = state[: (n+1)*2].reshape((n+1, 2))
+		obstacle_state = state[(n+1)*2:].reshape((num_obs, 2))
+
 		v = []
-		n = self.env.N
-		goal_pos = state[n]
-		x = []
+		goal_pos = agent_goal_state[n]
 		for i in range(n):
-			action = [0,0]
+			action = np.zeros(2)
+			pos1 = agent_goal_state[i]
 
-			pos1 = state[i]
-
-			if i in x:
-				action = rescale_vector(goal_pos-pos1, 1, 0)*1.2
-				v.append(action)
-				continue
-
+			# --- Formation & goal giữ nguyên ---
 			for j in range(n):
-				if i==j or i in x:
+				if i == j:
 					continue
-				pos2 = state[j]
+				pos2 = agent_goal_state[j]
 				action += (pos2-pos1)*(1-self.WM[i][j]/self.get_distance(pos1,pos2))
 
 			action2 = (goal_pos-pos1)*(1-self.WM[i][n]/self.get_distance(goal_pos, pos1))
 			action = rescale_vector(action, 2, 0)
 			action2 = rescale_vector(action2, 2, 0)
-			#print("action2: ", action2)
-
 			action = 0.6*action + 0.4*action2
-			action = rescale_vector(action, 2, 0)
 
+			# --- Thêm lực đẩy từ obstacle ---
+			for obs_pos in obstacle_state:
+				vec = pos1 - obs_pos
+				dist = np.linalg.norm(vec)
+				if dist < self.env.obstacle_safe_dist * 2:  # chỉ tính nếu đủ gần
+					repulse = 2.0 * (1.0/(dist+1e-6)) * (vec/(dist+1e-6))  # hệ số 2.0 có thể điều chỉnh
+					action += repulse
+
+			action = rescale_vector(action, 2, 0)
 			v.append(action)
 
-		#print(v)
 		v = np.ndarray.flatten(np.array(v))
-
-		#print(v)
-
-		#action = np.random.uniform(-2, 2, (3*2))
 		return v
 
 	def add_noise(self, action, step, decay = False, noise_scale = 0.1):
@@ -370,15 +366,16 @@ if __name__ == "__main__":
     # Policy Model
     n = No_of_UAVs
     actor_input_dim = (n+1)*2
-    Actor_net = Model((actor_input_dim,), act_dim, 'relu', 'tanh', [400,300])
+    Actor_net = Model((obs_dim,), act_dim, 'relu', 'tanh', [400,300])
     #print(Actor_net.summary())
 
     # Q-value Model
-    Critic_net1 = Model((actor_input_dim+act_dim,), 1, 'relu', 'linear', [400,300])
-    Critic_net2 = Model((actor_input_dim+act_dim,), 1, 'relu', 'linear', [400,300])
+    Critic_net1 = Model((obs_dim+act_dim,), 1, 'relu', 'linear', [400,300])
+    Critic_net2 = Model((obs_dim+act_dim,), 1, 'relu', 'linear', [400,300])
     #print(Critic_net.summary())
 
-    agent = TD3(env_name, env, Actor_net, Critic_net1, Critic_net2, decay = False, render=args.render, act_dim = act_dim, obs_dim = obs_dim)
+    agent = TD3(env_name, env, Actor_net, Critic_net1, Critic_net2, decay=False, render=args.render,
+            act_dim=act_dim, obs_dim=obs_dim, memory_size=100000)
 
     if args.test:
         # path = args.a_path
