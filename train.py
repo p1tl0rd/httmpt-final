@@ -364,16 +364,18 @@ if __name__ == "__main__":
     env_name = "UAVSwarm"
     env = Swarm()
     No_of_UAVs = env.N
-    obs_dim = No_of_UAVs*2 + 2
+    obs_dim = No_of_UAVs*2 + 2 + env.num_obstacles*2
     act_dim = No_of_UAVs*2
 
     # Policy Model
-    Actor_net = Model((obs_dim,), act_dim, 'relu', 'tanh', [400,300])
+    n = No_of_UAVs
+    actor_input_dim = (n+1)*2
+    Actor_net = Model((actor_input_dim,), act_dim, 'relu', 'tanh', [400,300])
     #print(Actor_net.summary())
 
     # Q-value Model
-    Critic_net1 = Model((obs_dim+act_dim,), 1, 'relu', 'linear', [400,300])
-    Critic_net2 = Model((obs_dim+act_dim,), 1, 'relu', 'linear', [400,300])
+    Critic_net1 = Model((actor_input_dim+act_dim,), 1, 'relu', 'linear', [400,300])
+    Critic_net2 = Model((actor_input_dim+act_dim,), 1, 'relu', 'linear', [400,300])
     #print(Critic_net.summary())
 
     agent = TD3(env_name, env, Actor_net, Critic_net1, Critic_net2, decay = False, render=args.render, act_dim = act_dim, obs_dim = obs_dim)
