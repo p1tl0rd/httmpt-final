@@ -118,7 +118,9 @@ class TD3():
 
 	def select_action2(self, state):
 		state = np.array(state)
-		state = state.reshape((self.env.N + 1,2))
+		n = self.env.N
+		state = state[: (n+1)*2]  # Only take agent and goal positions
+		state = state.reshape((n+1, 2))
 		
 		v = []
 		n = self.env.N
@@ -307,6 +309,11 @@ class TD3():
 				rewards = np.asarray(batch[2])
 				next_states = np.asarray(batch[3]).astype('float32')
 				dones = np.asarray(batch[4])
+
+				# Python
+				n = self.env.N
+				states = states[:, : (n+1)*2]
+				next_states = next_states[:, : (n+1)*2]
 
 				critic_loss = self.update_critic(states, actions, rewards, next_states, dones, t)
 

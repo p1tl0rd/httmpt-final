@@ -1,3 +1,5 @@
+# environment.py
+
 import copy
 import time
 import numpy as np
@@ -6,254 +8,268 @@ import matplotlib.pyplot as plt
 from shapely.geometry import Point
 import matplotlib.animation as animation
 from shapely.geometry.polygon import Polygon
-import pygame  # Thêm dòng này
+import pygame
 
-# Formation reward changed to a negative function based on distance from mean center
 class Swarm(object):
-	"""
-	"""
-	def __init__(self, v_max = 2, v_min = 0, safe_distance = 1, render_var=False):
-		self.N, self.N_f, self.Weight_matrix, self.WP_list = Load_files()
+    """
+    Môi trường mô phỏng một bầy UAV, học cách giữ đội hình và đi đến các waypoint
+    trong khi tránh các vật cản.
+    """
+    def __init__(self, v_max=2, v_min=0, safe_distance=1, render_var=False):
+        # Tải cấu hình từ file utils.py
+        self.N, self.N_f, self.Weight_matrix, self.WP_list = Load_files()
 
-		self.wp_rad = 0.5
-		self.counter = 0
-		self.render_var = render_var
-		self.v_max = v_max
-		self.v_min = v_min
-		self.max_steps = 1000
-		self.wp_update_var = 0
-		self.safe_distance = safe_distance
-		self.timestep = 0.1
+        # Tham số mô phỏng
+        self.wp_rad = 0.5
+        self.counter = 0
+        self.render_var = render_var
+        self.v_max = v_max
+        self.v_min = v_min
+        self.max_steps = 1000
+        self.wp_update_var = 0
+        self.safe_distance = safe_distance  # Khoảng cách an toàn giữa các agent
+        self.timestep = 0.1
+        self.done = False
 
-		self.done = False
+        # Tham số vật cản
+        self.num_obstacles = 10
+        self.obstacle_radius = 1.5
+        self.obstacle_pos = []
+        self.obstacle_safe_dist = self.obstacle_radius + 1.0 # Tổng bán kính vùng nguy hiểm
 
-		if self.render_var:
-			self.show_plot()
+        # === Hằng số cho Hàm thưởng (Reward Constants) ===
+        # Phần thưởng dương
+        self.formation_reward_const = 0.1
+        self.goal_reward_const = 50
 
-		# Define reward constants
-		self.goal_reward_const = -1
-		self.formation_reward_const = -1
+        # Hình phạt (số âm)
+        self.time_penalty_const = -0.1
+        self.agent_collision_penalty = -200 # Phạt va chạm agent
+        
+        # Hằng số mới cho việc phạt né vật cản theo cách tinh chỉnh
+        self.obstacle_invasion_weight = -50.0  # Trọng số phạt khi xâm phạm vùng an toàn
+        self.obstacle_collision_penalty = -200 # Phạt khi va chạm cứng với vật cản
 
-		# Define rewards
-		self.goal_reward = 10
-		self.formation_reward = 1
-		self.collision_penalty = -100
+        # Tham số môi trường và Pygame
+        self.const = 30
+        self.boundary_points = [(self.const,self.const),(-self.const,self.const),(-self.const,-self.const),(self.const,-self.const)]
+        self.start_location = np.array([[i, np.random.randint(3)] for i in range(self.N)]).astype('float64')
+        
+        self.pos = copy.copy(self.start_location)
+        self.discard_list = []
+        self.screen_size = 600
+        self.pygame_initialized = False
 
-		self.const = 30
-		self.boundary_points = [(self.const,self.const),(-self.const,self.const),(-self.const,-self.const),(self.const,-self.const)]
-		self.start_location = np.array([[i,np.random.randint(3)] for i in range(self.N)]).astype('float64')
-		
-		# Iterators for storing the position of agents
-		self.pos = copy.copy(self.start_location)
-		self.pos_old = self.start_location
+        # Khởi tạo vật cản lần đầu
+        self._generate_obstacles()
 
-		self.discard_list = []
-		self.record_x = copy.copy(list(self.start_location[:,0]))
-		self.record_y = copy.copy(list(self.start_location[:,1]))
+    def _generate_obstacles(self):
+        """Tạo ngẫu nhiên vị trí các vật cản, đảm bảo chúng không quá gần điểm xuất phát/đích."""
+        self.obstacle_pos.clear()
+        start_buffer = 5.0
+        goal_buffer = 5.0
+        
+        while len(self.obstacle_pos) < self.num_obstacles:
+            pos_x = np.random.uniform(-self.const + self.obstacle_radius, self.const - self.obstacle_radius)
+            pos_y = np.random.uniform(-self.const + self.obstacle_radius, self.const - self.obstacle_radius)
+            new_pos = np.array([pos_x, pos_y])
 
-		self.screen_size = 600
-		self.pygame_initialized = False
+            # Kiểm tra chồng chéo với điểm xuất phát, waypoint và các vật cản khác
+            if any(self.get_distance(new_pos, p) < start_buffer for p in self.start_location): continue
+            if any(self.get_distance(new_pos, p) < goal_buffer for p in self.WP_list): continue
+            if any(self.get_distance(new_pos, p) < 2.5 * self.obstacle_radius for p in self.obstacle_pos): continue
 
-	def show_plot(self):
-		plt.show()
+            self.obstacle_pos.append(new_pos)
 
-	def get_distance(self, point1, point2):
-		return np.linalg.norm(point1-point2)
+    def get_distance(self, point1, point2):
+        """Tính khoảng cách Euclidean giữa hai điểm."""
+        return np.linalg.norm(point1 - point2)
 
-	def restore_start_location(self):
-		# Restore the original values of pos
-		#self.WP_list = list(np.random.permutation([[-8,9],[-8,-9],[8,-9],[8,9]]))
-		temp_var = 19
-		self.WP_list = list(np.random.permutation([[-temp_var,temp_var],[-temp_var,-temp_var]
-												,[temp_var,-temp_var],[temp_var,temp_var]]))
-		#self.WP_list = list([[50,50]])
-		self.pos = copy.copy(self.start_location)
-		self.pos_old = copy.copy(self.start_location)
-		self.wp_update_var = 0
-		self.discard_list.clear()
+    def restore_start_location(self):
+        """Đặt lại trạng thái môi trường về ban đầu cho một episode mới."""
+        temp_var = 19
+        self.WP_list = list(np.random.permutation([[-temp_var, temp_var], [-temp_var, -temp_var],
+                                                   [temp_var, -temp_var], [temp_var, temp_var]]))
+        self.pos = copy.copy(self.start_location)
+        self.wp_update_var = 0
+        self.discard_list.clear()
+        self.counter = 0
+        self._generate_obstacles()
 
-	def reset(self):
-		self.restore_start_location()
-
-		goal_pos = self.get_current_waypoint()
-		state = list()
-
-		for pos1 in self.pos:
-			state.append(pos1)
-
-		state.append(goal_pos)
-		state = list(np.ndarray.flatten(np.array(state)))
-		
-		return state
+    def reset(self):
+        """Reset môi trường và trả về trạng thái quan sát ban đầu."""
+        self.restore_start_location()
+        goal_pos = self.get_current_waypoint()
+        
+        # Xây dựng vector trạng thái
+        state_list = []
+        state_list.extend(self.pos.flatten())
+        state_list.extend(goal_pos.flatten())
+        if self.obstacle_pos:
+            state_list.extend(np.array(self.obstacle_pos).flatten())
+        
+        return np.array(state_list)
 	
-	def init_pygame(self):
-		pygame.init()
-		self.screen = pygame.display.set_mode((self.screen_size, self.screen_size))
-		pygame.display.set_caption("Swarm Simulation")
-		self.clock = pygame.time.Clock()
-		self.pygame_initialized = True
+    def init_pygame(self):
+        """Khởi tạo Pygame để render."""
+        pygame.init()
+        self.screen = pygame.display.set_mode((self.screen_size, self.screen_size))
+        pygame.display.set_caption("Swarm Simulation with Obstacles")
+        self.clock = pygame.time.Clock()
+        self.pygame_initialized = True
 
-	def render(self, ep):
-		if not self.pygame_initialized:
-			self.init_pygame()
+    def render(self, ep):
+        """Vẽ trạng thái hiện tại của môi trường."""
+        if not self.pygame_initialized: self.init_pygame()
 
-		self.screen.fill((255, 255, 255))  # Nền trắng
+        self.screen.fill((255, 255, 255))
+        pygame.draw.rect(self.screen, (0, 0, 0), (0, 0, self.screen_size, self.screen_size), 2)
 
-		# Vẽ boundary
-		pygame.draw.rect(self.screen, (0, 0, 0), (0, 0, self.screen_size, self.screen_size), 2)
+        def to_screen_coords(pos, radius=0):
+            scale = self.screen_size / (2 * self.const)
+            x = int((pos[0] + self.const) * scale)
+            y = int((self.const - pos[1]) * scale)
+            r = int(radius * scale)
+            return x, y, r
 
-		# Chuyển đổi hệ trục (tọa độ thực -> pixel)
-		def to_screen_coords(pos):
-			x = int((pos[0] + self.const) / (2 * self.const) * self.screen_size)
-			y = int((self.const - pos[1]) / (2 * self.const) * self.screen_size)
-			return x, y
+        # Vẽ vật cản và vùng penalty
+        for obs_pos in self.obstacle_pos:
+            # Vẽ vùng penalty (vùng an toàn) - vòng tròn lớn, nét đứt hoặc màu nhạt
+            ox, oy, penalty_rad = to_screen_coords(obs_pos, self.obstacle_safe_dist)
+            pygame.draw.circle(self.screen, (255, 200, 200), (ox, oy), penalty_rad, width=2)  # Màu đỏ nhạt, nét mảnh
 
-		# Vẽ UAVs
-		for pos in self.pos:
-			x, y = to_screen_coords(pos)
-			pygame.draw.circle(self.screen, (3, 96, 22), (x, y), 10)
+            # Vẽ obstacle thật (vòng tròn nhỏ, màu đậm)
+            ox, oy, orad = to_screen_coords(obs_pos, self.obstacle_radius)
+            pygame.draw.circle(self.screen, (50, 50, 50), (ox, oy), orad)
 
-		# Vẽ waypoint hiện tại
-		wap = self.get_current_waypoint()
-		wx, wy = to_screen_coords(wap)
-		pygame.draw.circle(self.screen, (255, 0, 0), (wx, wy), 12)
+        # Vẽ UAVs
+        for pos in self.pos:
+            x, y, _ = to_screen_coords(pos)
+            pygame.draw.circle(self.screen, (3, 96, 22), (x, y), 8)
 
-		pygame.display.flip()
-		self.clock.tick(30)  # 30 FPS
+        # Vẽ waypoint
+        wap = self.get_current_waypoint()
+        wx, wy, _ = to_screen_coords(wap)
+        pygame.draw.circle(self.screen, (255, 0, 0), (wx, wy), 10, 3)
 
-		# Để thoát bằng nút đóng cửa sổ
-		for event in pygame.event.get():
-			if event.type == pygame.QUIT:
-				pygame.quit()
-				exit()
+        pygame.display.flip()
+        self.clock.tick(30)
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                exit()
 
-		# --- XÓA hoặc COMMENT toàn bộ phần matplotlib bên dưới ---
-		# wap = self.get_current_waypoint()
-		# x,y = [pos[0] for pos in self.pos], [pos[1] for pos in self.pos]
-		# plt.clf()
-		# plt.axis([-self.const, self.const, -self.const, self.const])
-		# plt.scatter(x,y, color = "#036016")
-		# plt.scatter(self.record_x, self.record_y, marker = '.', color = "#069E2D", alpha = 0.4)
-		# plt.scatter(wap[0], wap[1], color='red', marker='*')
-		# plt.pause(0.001)
+    def get_current_waypoint(self):
+        """Lấy waypoint mục tiêu hiện tại."""
+        return self.WP_list[self.wp_update_var]
 
-		# if ep%20==0:
-		# 	if len(self.record_x)>30:
-		# 		del self.record_x[0:9]
-		# 		del self.record_y[0:9]
-		# 	self.record_x+=x
-		# 	self.record_y+=y
+    def update_pos(self, v):
+        """Cập nhật vị trí của các agent dựa trên vector vận tốc."""
+        self.pos += v * self.timestep
 
-		if ep%10==0:
-			if len(self.record_x) > self.N * 5:
-				for i in range(self.N):
-					self.record_x.pop(i)
-					self.record_y.pop(i)
+    def step(self, v):
+        """Thực hiện một bước trong môi trường."""
+        self.counter += 1
+        goal_pos = self.get_current_waypoint()
+        
+        # Khởi tạo các biến để log reward
+        reward_formation = 0
+        reward_goal = 0
+        penalty_collision_agent = 0
+        penalty_collision_obstacle = 0
+        penalty_time = 0
+        
+        if self.done:
+            self.done = False
+            self.restore_start_location()
 
-			self.record_x += [pos[0] for pos in self.pos]
-			self.record_y += [pos[1] for pos in self.pos]
-		# #00aeff #3bc1ff #84d8ff #b3e7ff #d0f0ff
+        if self.counter >= self.max_steps:
+            print("Max-steps reached")
+            self.done = True
 
-	def action_sample(self):
-		return np.random.uniform(-self.v_max, self.v_max, (self.N*2))		
+        v = np.reshape(v, (self.N, 2))
+        v = rescale_vector(v, self.v_max, self.v_min)
+        self.update_pos(v)
+        
+        collision_detected = False
+        
+        for i, pos1 in enumerate(self.pos):
+            
+            # --- 1. Agent-Agent Collision & Formation Reward ---
+            for j, pos2 in enumerate(self.pos):
+                if i == j: continue
+                dist = self.get_distance(pos1, pos2)
+                
+                if dist < self.safe_distance:
+                    penalty_collision_agent += self.agent_collision_penalty
+                    self.done = True
+                    collision_detected = True
+                    break
 
-	def boundary_check(self):
-		var = False
+                if abs(dist - self.Weight_matrix[i][j]) <= 0.2:
+                    reward_formation += self.formation_reward_const
 
-		point = [Point(pos[0], pos[1]) for pos in self.pos]
-		polygon = Polygon(self.boundary_points)
+            if collision_detected: break
 
-		var = np.mean([not polygon.contains(p) for p in point])
+            # --- 2. Obstacle Collision Penalty (LOGIC ĐÃ ĐƯỢC CẬP NHẬT) ---
+            for obs_pos in self.obstacle_pos:
+                dist_to_surface = self.get_distance(pos1, obs_pos) - self.obstacle_radius
+                
+                if dist_to_surface < 0: # Va chạm cứng
+                    penalty_collision_obstacle += self.obstacle_collision_penalty
+                    self.done = True
+                    collision_detected = True
+                    break
+                
+                safe_zone_width = self.obstacle_safe_dist - self.obstacle_radius
+                if dist_to_surface < safe_zone_width: # Xâm phạm vùng an toàn
+                    invasion_ratio = 1.0 - (dist_to_surface / safe_zone_width)
+                    penalty_collision_obstacle += self.obstacle_invasion_weight * (invasion_ratio ** 2)
 
-		if not var:
-			return False
-		else:
-			return True
+            if collision_detected: break
 
-	def get_current_waypoint(self):
-		return self.WP_list[self.wp_update_var]
+        # --- 3. Goal & Time Reward (Chỉ tính khi không có va chạm) ---
+        if not self.done:
+            for i, pos1 in enumerate(self.pos):
+                goal_distance = self.get_distance(pos1, goal_pos)
+                if abs(goal_distance - self.Weight_matrix[i][self.N]) <= self.wp_rad and i not in self.discard_list:
+                    self.discard_list.append(i)
+                    reward_goal += self.goal_reward_const
+                else:
+                    penalty_time += self.time_penalty_const
 
-	def update_pos(self, v):
-		self.pos_old = copy.copy(self.pos)
-		self.pos += v*self.timestep
-		#time.sleep(0.1)
+        # --- 4. Kiểm tra hoàn thành mục tiêu ---
+        if len(self.discard_list) == self.N:
+            print("GOAL REACHED", end=" ")
+            self.discard_list.clear()
+            self.wp_update_var += 1
+            if self.wp_update_var >= len(self.WP_list):
+                self.done = True
+                print("FINAL GOAL", end=" ")
+                self.wp_update_var -= 1
 
-	def step(self, v):
-		self.counter+=1
-		#print(f"Step: {self.counter}")
-		goal_pos = self.get_current_waypoint()					# Waypoint to be followed
-		state = list()											# distance list (input to the actor network)
-		reward = 0												# intialize reward variable
-		if self.done:
-			self.done = False
-			self.restore_start_location()
+        # Tổng hợp reward
+        total_reward = (
+            reward_formation
+            + reward_goal
+            + penalty_collision_agent
+            + penalty_collision_obstacle
+            + penalty_time
+        )
 
-		# End episode if max number of steps are reached
-		if self.counter%self.max_steps == 0:
-			print("Max-steps reached")
-			self.counter = 0
-			self.done = True
+        info = {
+            'reward_formation': reward_formation,
+            'reward_goal': reward_goal,
+            'penalty_agent_collision': penalty_collision_agent,
+            'penalty_obstacle_collision': penalty_collision_obstacle,
+            'penalty_time': penalty_time
+        }
+        
+        # Xây dựng lại state để trả về
+        state_list = []
+        state_list.extend(self.pos.flatten())
+        state_list.extend(goal_pos.flatten())
+        if self.obstacle_pos:
+            state_list.extend(np.array(self.obstacle_pos).flatten())
 
-		# Check if all agents are within environment boundaries
-		# var = self.boundary_check
-		# End episode if max number of steps are reached
-		if self.counter%self.max_steps == 0:
-			print("Max-steps reached")
-			self.counter = 0
-			self.done = True
-
-		# Check if all agents are within environment boundaries
-		# var = self.boundary_check()
-		# if var:
-		# 	self.done = True
-		# 	self.counter=0
-
-		# Reshape and limit the velocity vector
-		v = np.reshape(v, (self.N,2))
-		v = rescale_vector(v, self.v_max, self.v_min)
-
-		# Update vehicle position using current velocity
-		self.update_pos(v)
-
-		temp_var=0
-		# Find the value of next_state and reward
-		for (i, pos1), pos1_old in zip(enumerate(self.pos), self.pos_old):
-			# Calculate formation reward
-			for (j, pos2), pos2_old in zip(enumerate(self.pos), self.pos_old):
-				if i==j:
-					continue
-				dist = self.get_distance(pos1,pos2)
-
-				if abs(dist-self.Weight_matrix[i][j])<=0.2:
-					reward += 0.1
-				elif dist<self.safe_distance:
-					reward += -100
-
-			# Goal Reward
-			goal_distance = self.get_distance(pos1, goal_pos)
-
-			#goal_distance_old = self.get_distance(pos1_old, goal_pos)
-			if abs(goal_distance-self.Weight_matrix[i][self.N])<=self.wp_rad and i not in self.discard_list:
-				#temp_var+=1
-				self.discard_list.append(i)
-				#print("ADDED")
-				reward += 50
-			else:
-				reward += -0.5
-
-			#if temp_var==self.N:
-			if len(self.discard_list)==self.N:
-				print("GOAL", end = " ")
-
-				self.discard_list.clear()
-				self.wp_update_var+=1
-				if self.wp_update_var == len(self.WP_list):
-					self.done = True
-					print("END GOAL", end = " ")
-					self.wp_update_var-=1
-
-			state.append(pos1)
-		state.append(goal_pos)
-		state = list(np.ndarray.flatten(np.array(state)))
-
-		return state, reward, self.done, {}
+        return np.array(state_list), total_reward, self.done, info
