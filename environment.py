@@ -49,6 +49,7 @@ class Swarm(object):
         # Hằng số mới cho việc phạt né vật cản theo cách tinh chỉnh
         self.obstacle_invasion_weight = -50.0  # Trọng số phạt khi xâm phạm vùng an toàn
         self.obstacle_penalty = -200  # hoặc -300 nếu muốn phạt mạnh hơn
+        self.obstacle_collision_penalty = -10  # or any value you want for the penalty
 
         # Tham số môi trường và Pygame
         self.const = 30

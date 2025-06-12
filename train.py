@@ -146,8 +146,15 @@ class TD3():
 			for obs_pos in obstacle_state:
 				vec = pos1 - obs_pos
 				dist = np.linalg.norm(vec)
-				if dist < self.env.obstacle_safe_dist * 2:  # chỉ tính nếu đủ gần
-					repulse = 2.0 * (1.0/(dist+1e-6)) * (vec/(dist+1e-6))  # hệ số 2.0 có thể điều chỉnh
+				safe_zone_boundary = self.env.obstacle_safe_dist
+				
+				if dist < safe_zone_boundary:
+					# Lực đẩy mạnh nhất khi ở gần, và giảm dần về 0 ở rìa vùng an toàn
+					strength = 1.0 - (dist / safe_zone_boundary)
+					
+					# Lực đẩy giờ đây tỉ lệ tuyến tính với "strength" thay vì 1/dist^2
+					# Hệ số 5.0 là trọng số của lực đẩy, có thể điều chỉnh
+					repulse = 5.0 * strength * (vec / (dist + 1e-6)) 
 					action += repulse
 
 			action = rescale_vector(action, 2, 0)
@@ -308,8 +315,8 @@ class TD3():
 
 				# Python
 				n = self.env.N
-				states = states[:, : (n+1)*2]
-				next_states = next_states[:, : (n+1)*2]
+				# states = states[:, : (n+1)*2]
+				# next_states = next_states[:, : (n+1)*2]
 
 				critic_loss = self.update_critic(states, actions, rewards, next_states, dones, t)
 
@@ -367,11 +374,9 @@ if __name__ == "__main__":
     n = No_of_UAVs
     actor_input_dim = (n+1)*2
     Actor_net = Model((obs_dim,), act_dim, 'relu', 'tanh', [400,300])
-    #print(Actor_net.summary())
-
-    # Q-value Model
     Critic_net1 = Model((obs_dim+act_dim,), 1, 'relu', 'linear', [400,300])
     Critic_net2 = Model((obs_dim+act_dim,), 1, 'relu', 'linear', [400,300])
+    #print(Actor_net.summary())
     #print(Critic_net.summary())
 
     agent = TD3(env_name, env, Actor_net, Critic_net1, Critic_net2, decay=False, render=args.render,
